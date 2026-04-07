@@ -1,0 +1,28 @@
+version: '3'
+
+env:
+    CGO_ENABLED: '0'
+    GOOS: linux
+    MAIN_PATH: ./cmd/openai/
+    BUILD_PATH: ./build/openai
+
+dotenv: ['.env']
+
+tasks:
+    default:
+        desc: List all available tasks
+        cmds:
+        - task --list
+        silent: true
+
+    setup:
+        desc: Download and tidy Go module dependencies
+        cmds:
+        - go mod download
+        - go mod tidy
+
+    build:
+        desc: Compile the project into a static binary
+        cmds:
+        - task: setup
+        - go build -tags all -a -ldflags '-s -w -extldflags "-static"' -trimpath -o ${BUILD_PATH} ${MAIN_PATH}
