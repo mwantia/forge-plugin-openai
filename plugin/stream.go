@@ -1,4 +1,4 @@
-package openai
+package plugin
 
 import (
 	"encoding/json"
@@ -7,7 +7,6 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/mwantia/forge-sdk/pkg/plugins"
-	"github.com/mwantia/forge-sdk/pkg/random"
 	openailib "github.com/sashabaranov/go-openai"
 )
 
@@ -22,27 +21,25 @@ type toolCallAccum struct {
 // Tool calls are accumulated across delta fragments and returned together on the
 // final Done chunk.
 type ChatStream struct {
-	id                 string
-	logger             hclog.Logger
-	stream             *openailib.ChatCompletionStream
-	done               bool
-	reasoning          bool
-	costPerInputToken  float64
-	costPerOutputToken float64
+	logger hclog.Logger
+	stream *openailib.ChatCompletionStream
+	done   bool
 
-	// toolCalls accumulates streaming tool call fragments keyed by choice index.
+	costPerInputToken       float64
+	costPerOutputToken      float64
+	costPerCachedInputToken float64
+
 	toolCalls map[int]*toolCallAccum
 }
 
-func NewChatStream(logger hclog.Logger, stream *openailib.ChatCompletionStream, reasoning bool, costPerInputToken, costPerOutputToken float64) *ChatStream {
+func newChatStream(logger hclog.Logger, stream *openailib.ChatCompletionStream, costIn, costOut, costCached float64) *ChatStream {
 	return &ChatStream{
-		id:                 random.GenerateNewID(),
-		logger:             logger.Named("stream"),
-		stream:             stream,
-		reasoning:          reasoning,
-		costPerInputToken:  costPerInputToken,
-		costPerOutputToken: costPerOutputToken,
-		toolCalls:          make(map[int]*toolCallAccum),
+		logger:                  logger.Named("stream"),
+		stream:                  stream,
+		costPerInputToken:       costIn,
+		costPerOutputToken:      costOut,
+		costPerCachedInputToken: costCached,
+		toolCalls:               make(map[int]*toolCallAccum),
 	}
 }
 
@@ -102,20 +99,14 @@ func (s *ChatStream) Recv() (*plugins.ChatChunk, error) {
 		}
 
 		return &plugins.ChatChunk{
-			ID:    s.id,
 			Role:  choice.Delta.Role,
 			Delta: choice.Delta.Content,
-			Done:  false,
 		}, nil
 	}
 }
 
-// buildDoneChunk assembles the final chunk, including any accumulated tool calls.
 func (s *ChatStream) buildDoneChunk(usage *openailib.Usage) *plugins.ChatChunk {
-	chunk := &plugins.ChatChunk{
-		ID:   s.id,
-		Done: true,
-	}
+	chunk := &plugins.ChatChunk{Done: true}
 
 	for _, acc := range s.toolCalls {
 		var args map[string]any
@@ -132,18 +123,32 @@ func (s *ChatStream) buildDoneChunk(usage *openailib.Usage) *plugins.ChatChunk {
 	}
 
 	if usage != nil && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
+		cached := 0
+		if usage.PromptTokensDetails != nil {
+			cached = usage.PromptTokensDetails.CachedTokens
+		}
+		nonCached := max(usage.PromptTokens-cached, 0)
+
 		u := &plugins.TokenUsage{
-			InputTokens:  usage.PromptTokens,
-			OutputTokens: usage.CompletionTokens,
-			TotalTokens:  usage.TotalTokens,
+			InputTokens:       usage.PromptTokens,
+			OutputTokens:      usage.CompletionTokens,
+			TotalTokens:       usage.TotalTokens,
+			CachedInputTokens: cached,
 		}
 		if s.costPerInputToken > 0 {
-			u.InputCost = float64(usage.PromptTokens) * s.costPerInputToken
+			u.InputCost = float64(nonCached) * s.costPerInputToken
 		}
 		if s.costPerOutputToken > 0 {
 			u.OutputCost = float64(usage.CompletionTokens) * s.costPerOutputToken
 		}
-		u.TotalCost = u.InputCost + u.OutputCost
+		if cached > 0 {
+			rate := s.costPerCachedInputToken
+			if rate == 0 {
+				rate = s.costPerInputToken
+			}
+			u.CachedInputCost = float64(cached) * rate
+		}
+		u.TotalCost = u.InputCost + u.OutputCost + u.CachedInputCost
 		chunk.Usage = u
 	}
 
