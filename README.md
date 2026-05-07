@@ -1,4 +1,4 @@
-# forge-plugin-openai
+# Forge Plugin - OpenAI
 
 Provider plugin that connects Forge to OpenAI and any OpenAI-compatible LLM API.
 
@@ -19,8 +19,11 @@ Provider plugin that connects Forge to OpenAI and any OpenAI-compatible LLM API.
 ```hcl
 plugin "provider" "openai" {
   config {
-    address = "https://api.openai.com"  # base URL — no /v1 suffix
-    token   = ""                         # API key (required)
+    address     = "https://api.openai.com"  # base URL — no /v1 suffix for OpenAI-compatible endpoints
+    token       = ""                         # API key (required)
+    org_id      = ""                         # OpenAI organisation ID (optional)
+    api_type    = "OPEN_AI"                  # OPEN_AI | AZURE | AZURE_AD | ANTHROPIC
+    api_version = ""                         # required for AZURE, AZURE_AD, ANTHROPIC
 
     http {
       timeout = "60s"
@@ -31,8 +34,11 @@ plugin "provider" "openai" {
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `address` | string | `https://api.openai.com` | Base URL of an OpenAI-compatible endpoint |
+| `address` | string | `https://api.openai.com` | Base URL. For OpenAI-compatible endpoints omit the `/v1` suffix — the driver appends it. For Azure/Anthropic use the full endpoint as-is. |
 | `token` | string | — | Bearer token / API key |
+| `org_id` | string | — | OpenAI organisation ID; sent as `OpenAI-Organization` header |
+| `api_type` | string | `OPEN_AI` | Wire protocol: `OPEN_AI`, `AZURE`, `AZURE_AD`, `ANTHROPIC` |
+| `api_version` | string | — | API version string; required for `AZURE`, `AZURE_AD`, and `ANTHROPIC` |
 | `seed` | int | — | Optional fixed seed for deterministic outputs |
 | `http.timeout` | duration | `60s` | Timeout for non-streaming calls (probe, embed, list models); streaming calls are controlled by context cancellation |
 
@@ -78,8 +84,10 @@ Set `address` to any OpenAI-compatible base URL to use third-party providers:
 ```hcl
 # Azure OpenAI
 config {
-  address = "https://<resource>.openai.azure.com/openai/deployments/<deployment>"
-  token   = "<azure-api-key>"
+  address     = "https://<resource>.openai.azure.com"
+  token       = "<azure-api-key>"
+  api_type    = "AZURE"
+  api_version = "2024-02-01"
 }
 
 # Local (e.g. LM Studio, vLLM)

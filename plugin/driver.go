@@ -65,20 +65,45 @@ func (d *OpenAIDriver) ConfigDriver(_ context.Context, cfg plugins.PluginConfig)
 		return fmt.Errorf("invalid timeout %q: %w", d.config.Http.Timeout, err)
 	}
 
-	baseURL := d.config.Address + "/v1"
-
-	unaryCfg := openai.DefaultConfig(d.config.Token)
-	unaryCfg.BaseURL = baseURL
+	unaryCfg := d.buildClientConfig()
 	unaryCfg.HTTPClient = &http.Client{Timeout: timeout}
 	d.client = openai.NewClientWithConfig(unaryCfg)
 
-	streamCfg := openai.DefaultConfig(d.config.Token)
-	streamCfg.BaseURL = baseURL
+	streamCfg := d.buildClientConfig()
 	streamCfg.HTTPClient = &http.Client{}
 	d.streamer = openai.NewClientWithConfig(streamCfg)
 
-	d.log.Info("Configured OpenAI driver", "address", d.config.Address, "timeout", timeout, "auth", d.config.Token != "")
+	d.log.Info("Configured OpenAI driver",
+		"address", d.config.Address,
+		"api_type", d.config.APIType,
+		"timeout", timeout,
+		"auth", d.config.Token != "",
+	)
 	return nil
+}
+
+// buildClientConfig maps OpenAIConfig fields onto an openai.ClientConfig.
+// For Azure/Anthropic the address is used verbatim; for all others /v1 is appended.
+func (d *OpenAIDriver) buildClientConfig() openai.ClientConfig {
+	cfg := openai.DefaultConfig(d.config.Token)
+
+	apiType := openai.APIType(d.config.APIType)
+	switch apiType {
+	case openai.APITypeAzure, openai.APITypeAzureAD, openai.APITypeCloudflareAzure, openai.APITypeAnthropic:
+		cfg.APIType = apiType
+		cfg.BaseURL = d.config.Address
+	default:
+		cfg.BaseURL = d.config.Address + "/v1"
+	}
+
+	if d.config.OrgID != "" {
+		cfg.OrgID = d.config.OrgID
+	}
+	if d.config.APIVersion != "" {
+		cfg.APIVersion = d.config.APIVersion
+	}
+
+	return cfg
 }
 
 func (d *OpenAIDriver) ProbePlugin(ctx context.Context) (bool, error) {
