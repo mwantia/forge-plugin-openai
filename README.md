@@ -17,7 +17,7 @@ Provider plugin that connects Forge to OpenAI and any OpenAI-compatible LLM API.
 ## Configuration
 
 ```hcl
-plugin "provider" "openai" {
+plugin "openai" "openai" {
   config {
     address     = "https://api.openai.com"  # base URL — no /v1 suffix for OpenAI-compatible endpoints
     token       = ""                         # API key (required)
